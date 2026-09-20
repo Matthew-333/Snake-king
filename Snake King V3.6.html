@@ -1,0 +1,864 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no, viewport-fit=cover">
+    <title>Snake king</title>
+    <style>
+        * {
+            margin: 0;
+            padding: 0;
+            box-sizing: border-box;
+            font-family: "Microsoft Yahei", sans-serif;
+            -webkit-user-select: none;
+            user-select: none;
+        }
+        body {
+            background-color: #1a1a1a;
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+            justify-content: center;
+            min-height: 100vh;
+            height: 100vh;
+            overflow: hidden;
+            touch-action: none;
+            padding: 10px;
+        }
+
+        .game-layout {
+            display: flex;
+            flex-direction: row;
+            align-items: center;
+            justify-content: center;
+            gap: 32px; 
+            max-width: 100%;
+            max-height: 85vh;
+        }
+
+        .canvas-area {
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+        }
+
+        h1 {
+            color: #4cd964;
+            font-size: 22px;
+            margin-bottom: 6px;
+            text-align: center;
+        }
+
+        #score {
+            color: #fff;
+            font-size: 16px;
+            margin-bottom: 8px;
+            text-align: center;
+        }
+
+        canvas {
+            border: 3px solid #4cd964;
+            background-color: #000;
+            display: block;
+            max-width: 65vw;
+            max-height: 65vh;
+            object-fit: contain;
+        }
+
+        .controls-container {
+            display: flex;
+            justify-content: center;
+            align-items: center;
+        }
+        .dpad {
+            display: grid;
+            grid-template-columns: repeat(3, 55px);
+            grid-template-rows: repeat(2, 55px);
+            gap: 8px;
+            justify-items: center;
+            align-items: center;
+        }
+        .btn-touch {
+            width: 55px;
+            height: 55px;
+            background-color: #2c2c2e;
+            border: 2px solid #4cd964;
+            border-radius: 12px;
+            color: #4cd964;
+            font-size: 20px;
+            font-weight: bold;
+            display: flex;
+            justify-content: center;
+            align-items: center;
+            cursor: pointer;
+            box-shadow: 0 4px 6px rgba(0, 0, 0, 0.4);
+            touch-action: manipulation;
+        }
+        .btn-touch:active {
+            background-color: #4cd964;
+            color: #000;
+            transform: scale(0.92);
+        }
+        #btnW { grid-column: 2; grid-row: 1; }
+        #btnA { grid-column: 1; grid-row: 2; }
+        #btnS { grid-column: 2; grid-row: 2; }
+        #btnD { grid-column: 3; grid-row: 2; }
+
+        @media (max-aspect-ratio: 1/1) {
+            .game-layout {
+                flex-direction: column;
+                align-items: center;
+                gap: 20px;
+            }
+            canvas {
+                max-width: 85vw;
+                max-height: 50vh;
+            }
+        }
+    </style>
+</head>
+<body>
+
+    <div class="game-layout">
+        <div class="canvas-area">
+            <h1 id="titleText">Snake king - Round 1</h1>
+            <div id="score">分数：0</div>
+            <canvas id="gameCanvas" width="600" height="600"></canvas>
+        </div>
+
+        <div class="controls-container">
+            <div class="dpad">
+                <div class="btn-touch" id="btnW">W</div>
+                <div class="btn-touch" id="btnA">A</div>
+                <div class="btn-touch" id="btnS">S</div>
+                <div class="btn-touch" id="btnD">D</div>
+            </div>
+        </div>
+    </div>
+
+    <script>
+        const canvas = document.getElementById('gameCanvas');
+        const ctx = canvas.getContext('2d');
+        const scoreDom = document.getElementById('score');
+        const titleDom = document.getElementById('titleText');
+
+        const gridSize = 20;
+        let snake = [{x: 15, y: 15}];
+        let food = {};
+        let dx = 1;
+        let dy = 0;
+        let score = 0;
+        let speed = 250;
+        let gameLoop = null;
+
+        let currentRound = 1;
+        let isGameStarted = false;
+        let isPausedForTransition = false;
+        let isEmoteActive = false;
+        let isGameOver = false;
+
+        let cheatSequence = [];
+        let isCheatVictory = false;
+
+        const btnWidth = 180;
+        const btnHeight = 45;
+        let btnX = 0;
+        let btnY = 0;
+        let btnR2X = 0;
+        let btnR2Y = 0;
+
+        let centerObstacles = [];
+
+        function setCenterObstacles() {
+            const gridWidth = Math.floor(canvas.width / gridSize);
+            const gridHeight = Math.floor(canvas.height / gridSize);
+            const midX = Math.floor(gridWidth / 2);
+            const midY = Math.floor(gridHeight / 2);
+
+            centerObstacles = [
+                {x: Math.floor(gridWidth / 4), y: Math.floor(gridHeight / 4)},
+                {x: Math.floor((3 * gridWidth) / 4), y: Math.floor(gridHeight / 4)},
+                {x: Math.floor(gridWidth / 4), y: Math.floor((3 * gridHeight) / 4)},
+                {x: Math.floor((3 * gridWidth) / 4), y: Math.floor((3 * gridHeight) / 4)},
+                {x: midX - 1, y: midY},
+                {x: midX + 1, y: midY}
+            ];
+        }
+
+        function createFood() {
+            const gridWidth = Math.floor(canvas.width / gridSize);
+            const gridHeight = Math.floor(canvas.height / gridSize);
+
+            food.x = Math.floor(Math.random() * gridWidth);
+            food.y = Math.floor(Math.random() * gridHeight);
+
+            for (let seg of snake) {
+                if (seg.x === food.x && seg.y === food.y) return createFood();
+            }
+
+            if (currentRound === 2) {
+                for (let block of centerObstacles) {
+                    if (block.x === food.x && block.y === food.y) return createFood();
+                }
+            }
+        }
+
+        function drawRect(x, y, color) {
+            ctx.fillStyle = color;
+            ctx.fillRect(x * gridSize, y * gridSize, gridSize - 1, gridSize - 1);
+        }
+
+        function handleGameOver() {
+            clearInterval(gameLoop);
+            isGameOver = true;
+            startGameOverHorseEmote();
+        }
+
+        function resetGame() {
+            clearInterval(gameLoop);
+            currentRound = 1;
+            isGameStarted = true;
+            isPausedForTransition = false;
+            isEmoteActive = false;
+            isGameOver = false;
+            isCheatVictory = false;
+            cheatSequence = [];
+            score = 0;
+            scoreDom.innerText = "分数：" + score;
+            titleDom.innerText = "Snake king - Round 1";
+
+            canvas.width = 600;
+            canvas.height = 600;
+
+            snake = [{x: 15, y: 15}];
+            dx = 1;
+            dy = 0;
+
+            createFood();
+            gameLoop = setInterval(game, speed);
+        }
+
+        function triggerVictory(byCheat = false) {
+            score = 300;
+            scoreDom.innerText = "分数：" + score;
+            clearInterval(gameLoop);
+            isCheatVictory = byCheat;
+
+            if (byCheat) {
+                startCheatEmote();
+            } else {
+                startMarioVsCrownSnakeEmote(false); // 正常 300 分通关动画
+            }
+        }
+
+        function triggerWSWS() {
+            score = 0;
+            scoreDom.innerText = "分数：" + score;
+            clearInterval(gameLoop);
+            startMarioVsCrownSnakeEmote(true); // WSWS 触发同样的通关动画（分数为 0）
+        }
+
+        function update() {
+            if (!isGameStarted || isPausedForTransition || isEmoteActive || isGameOver) return;
+
+            const head = {x: snake[0].x + dx, y: snake[0].y + dy};
+            const gridWidth = Math.floor(canvas.width / gridSize);
+            const gridHeight = Math.floor(canvas.height / gridSize);
+
+            if (head.x < 0 || head.x >= gridWidth || head.y < 0 || head.y >= gridHeight) {
+                handleGameOver();
+                return;
+            }
+
+            if (currentRound === 2) {
+                for (let block of centerObstacles) {
+                    if (head.x === block.x && head.y === block.y) {
+                        handleGameOver();
+                        return;
+                    }
+                }
+            }
+
+            for (let seg of snake) {
+                if (head.x === seg.x && head.y === seg.y) {
+                    handleGameOver();
+                    return;
+                }
+            }
+
+            snake.unshift(head);
+
+            if (head.x === food.x && head.y === food.y) {
+                score += 10;
+                scoreDom.innerText = "分数：" + score;
+
+                if (currentRound === 1 && score >= 100) {
+                    triggerRound1Complete();
+                    return;
+                }
+
+                if (score >= 300) {
+                    triggerVictory(false);
+                    return;
+                }
+
+                createFood();
+            } else {
+                snake.pop();
+            }
+        }
+
+        function triggerRound1Complete() {
+            clearInterval(gameLoop);
+            isPausedForTransition = true;
+            render();
+        }
+
+        function drawStartOverlay() {
+            ctx.fillStyle = "rgba(0, 0, 0, 0.85)";
+            ctx.fillRect(0, 0, canvas.width, canvas.height);
+
+            ctx.fillStyle = "#4cd964";
+            ctx.font = "bold 32px 'Microsoft Yahei', sans-serif";
+            ctx.textAlign = "center";
+            ctx.fillText("Snake king", canvas.width / 2, canvas.height / 2 - 40);
+
+            btnX = (canvas.width - btnWidth) / 2;
+            btnY = canvas.height / 2 + 10;
+
+            ctx.fillStyle = "#4cd964";
+            ctx.fillRect(btnX, btnY, btnWidth, btnHeight);
+
+            ctx.fillStyle = "#000";
+            ctx.font = "bold 18px 'Microsoft Yahei', sans-serif";
+            ctx.fillText("Start Game", canvas.width / 2, btnY + 28);
+        }
+
+        function drawOverlay() {
+            ctx.fillStyle = "rgba(0, 0, 0, 0.75)";
+            ctx.fillRect(0, 0, canvas.width, canvas.height);
+
+            ctx.fillStyle = "#4cd964";
+            ctx.font = "bold 28px 'Microsoft Yahei', sans-serif";
+            ctx.textAlign = "center";
+            ctx.fillText("Round 1 Complete!", canvas.width / 2, canvas.height / 2 - 40);
+
+            btnX = (canvas.width - btnWidth) / 2;
+            btnY = (canvas.height - btnHeight) / 2 + 10;
+
+            ctx.fillStyle = "#4cd964";
+            ctx.fillRect(btnX, btnY, btnWidth, btnHeight);
+
+            ctx.fillStyle = "#000";
+            ctx.font = "bold 18px 'Microsoft Yahei', sans-serif";
+            ctx.fillText("Continue", canvas.width / 2, btnY + 28);
+        }
+
+        function startRound2(isRestart = false) {
+            currentRound = 2;
+            isGameStarted = true;
+            isPausedForTransition = false;
+            isGameOver = false;
+            isCheatVictory = false;
+            cheatSequence = [];
+
+            if (isRestart) {
+                score = 100;
+            }
+            scoreDom.innerText = "分数：" + score;
+            titleDom.innerText = "Snake king - Round 2";
+
+            canvas.width = 600;
+            canvas.height = 600;
+
+            setCenterObstacles();
+            snake = [{x: 3, y: 3}];
+            dx = 1;
+            dy = 0;
+            createFood();
+
+            gameLoop = setInterval(game, speed);
+        }
+
+        // 绘制单个像素五角星
+        function drawPixelStar(cx, cy, p, color) {
+            ctx.fillStyle = color;
+            ctx.fillRect(cx - p, cy - p*3, p*2, p*6);
+            ctx.fillRect(cx - p*3, cy - p, p*6, p*2);
+            ctx.fillRect(cx - p*2, cy - p*2, p*4, p*4);
+        }
+
+        // --- 1. 胜利庆祝动画：像素马里奥跳起拳击皇冠蛇 + 像素星星闪烁 (用于 300分胜利 与 WSWS 触发) ---
+        function startMarioVsCrownSnakeEmote(isWSWS = false) {
+            isEmoteActive = true;
+            let frame = 0;
+
+            const stars = [
+                {x: 80, y: 80}, {x: 220, y: 60}, {x: 480, y: 90},
+                {x: 120, y: 480}, {x: 500, y: 450}, {x: 300, y: 120},
+                {x: 420, y: 520}, {x: 70, y: 320}, {x: 520, y: 280}
+            ];
+
+            const animationInterval = setInterval(() => {
+                ctx.clearRect(0, 0, canvas.width, canvas.height);
+                ctx.fillStyle = "#111";
+                ctx.fillRect(0, 0, canvas.width, canvas.height);
+
+                const p = 4;
+                const groundY = Math.floor(canvas.height / 2) + 80;
+
+                // A. 闪烁的像素星星
+                stars.forEach((star, idx) => {
+                    if ((frame + idx * 2) % 6 < 4) {
+                        const starColor = (frame + idx) % 2 === 0 ? "#f1c40f" : "#ffffff";
+                        drawPixelStar(star.x, star.y, p, starColor);
+                    }
+                });
+
+                // 跳跃拳击循环
+                const cycle = frame % 16;
+                let marioX = 140;
+                let marioY = groundY - p*30;
+                let isJumping = false;
+                let isHitting = false;
+
+                if (cycle >= 4 && cycle <= 12) {
+                    isJumping = true;
+                    marioY -= Math.sin((cycle - 4) / 8 * Math.PI) * (p * 22);
+                    marioX += (cycle - 4) * p * 2;
+                    if (cycle >= 7 && cycle <= 10) {
+                        isHitting = true;
+                    }
+                }
+
+                // B. 像素马里奥
+                const mX = marioX;
+                const mY = marioY;
+
+                ctx.fillStyle = "#e74c3c";
+                ctx.fillRect(mX + p*2, mY - p*24, p*12, p*4);
+                ctx.fillRect(mX + p*4, mY - p*28, p*12, p*4);
+
+                ctx.fillStyle = "#ffcc99";
+                ctx.fillRect(mX + p*4, mY - p*20, p*14, p*8);
+
+                ctx.fillStyle = "#000000";
+                ctx.fillRect(mX + p*10, mY - p*16, p*8, p*4);
+                ctx.fillRect(mX + p*12, mY - p*20, p*2, p*4);
+
+                ctx.fillStyle = "#2980b9";
+                ctx.fillRect(mX + p*4, mY - p*12, p*10, p*12);
+
+                ctx.fillStyle = "#e74c3c";
+                ctx.fillRect(mX, mY - p*12, p*4, p*8);
+                if (isJumping) {
+                    ctx.fillRect(mX + p*12, mY - p*22, p*6, p*12);
+                    ctx.fillStyle = "#ffcc99";
+                    ctx.fillRect(mX + p*14, mY - p*28, p*6, p*6);
+                } else {
+                    ctx.fillRect(mX + p*14, mY - p*10, p*4, p*8);
+                }
+
+                ctx.fillStyle = "#8b4513";
+                ctx.fillRect(mX + p*2, mY, p*6, p*4);
+                ctx.fillRect(mX + p*10, mY, p*6, p*4);
+
+                // C. 头戴皇冠的像素蛇
+                let snakeX = 360;
+                let snakeY = groundY - p*32;
+
+                if (isHitting) {
+                    snakeX += p * 4;
+                }
+
+                ctx.fillStyle = "#f1c40f";
+                ctx.fillRect(snakeX + p*6, snakeY - p*16, p*20, p*4);
+                ctx.fillRect(snakeX + p*4, snakeY - p*26, p*5, p*10);
+                ctx.fillRect(snakeX + p*13, snakeY - p*30, p*6, p*14);
+                ctx.fillRect(snakeX + p*23, snakeY - p*26, p*5, p*10);
+                ctx.fillStyle = "#e74c3c";
+                ctx.fillRect(snakeX + p*15, snakeY - p*26, p*2, p*3);
+
+                ctx.fillStyle = isHitting ? "#ff3b30" : "#2ecc71";
+                ctx.fillRect(snakeX, snakeY - p*10, p*34, p*30);
+                ctx.fillStyle = isHitting ? "#c0392b" : "#27ae60";
+                ctx.fillRect(snakeX + p*4, snakeY + p*10, p*26, p*10);
+
+                ctx.fillStyle = "#ffffff";
+                ctx.fillRect(snakeX + p*6, snakeY - p*4, p*8, p*8);
+                ctx.fillStyle = "#000000";
+                ctx.fillRect(snakeX + p*8, snakeY - p*2, p*4, p*4);
+                ctx.fillStyle = "#e74c3c";
+                ctx.fillRect(snakeX - p*8, snakeY + p*4, p*8, p*2);
+
+                if (isHitting) {
+                    drawPixelStar(snakeX - p*2, snakeY - p*10, p*2, "#f39c12");
+                    drawPixelStar(snakeX + p*4, snakeY - p*18, p*3, "#ffffff");
+                }
+
+                frame++;
+
+                if (frame > 90) {
+                    clearInterval(animationInterval);
+                    isEmoteActive = false;
+                    isGameOver = true;
+
+                    ctx.fillStyle = "rgba(0, 0, 0, 0.85)";
+                    ctx.fillRect(0, 0, canvas.width, canvas.height);
+
+                    ctx.fillStyle = "#4cd964";
+                    ctx.font = "bold 36px 'Microsoft Yahei', sans-serif";
+                    ctx.textAlign = "center";
+                    ctx.fillText("VICTORY!", canvas.width / 2, canvas.height / 2 - 50);
+
+                    ctx.fillStyle = "#ffffff";
+                    ctx.font = "22px 'Microsoft Yahei', sans-serif";
+                    ctx.fillText(isWSWS ? "Score: 0 (WSWS End)" : "You reached 300 points!", canvas.width / 2, canvas.height / 2 - 10);
+
+                    btnX = (canvas.width - btnWidth) / 2;
+                    btnY = canvas.height / 2 + 30;
+
+                    ctx.fillStyle = "#4cd964";
+                    ctx.fillRect(btnX, btnY, btnWidth, btnHeight);
+
+                    ctx.fillStyle = "#000000";
+                    ctx.font = "bold 18px 'Microsoft Yahei', sans-serif";
+                    ctx.fillText("Play Again", canvas.width / 2, btnY + 28);
+                }
+            }, 50);
+        }
+
+        // --- 2. 失败动画（骑马骑士举着 GAME OVER 战旗）---
+        function startGameOverHorseEmote() {
+            isEmoteActive = true;
+            let frame = 0;
+
+            const animationInterval = setInterval(() => {
+                ctx.clearRect(0, 0, canvas.width, canvas.height);
+                ctx.fillStyle = "#111";
+                ctx.fillRect(0, 0, canvas.width, canvas.height);
+
+                const p = 4;
+                const centerX = Math.floor(canvas.width * 0.18);
+                const centerY = Math.floor(canvas.height * 0.52);
+
+                const gallop = (frame % 8 < 4) ? p*2 : 0;
+
+                const hX = centerX;
+                const hY = centerY - gallop;
+
+                ctx.fillStyle = "#8b4513";
+                ctx.fillRect(hX + p*10, hY, p*45, p*24);
+                ctx.fillStyle = "#5c2c06";
+                ctx.fillRect(hX + p*15, hY + p*16, p*35, p*8);
+
+                ctx.fillStyle = "#8b4513";
+                ctx.fillRect(hX + p*42, hY - p*20, p*18, p*24);
+                ctx.fillRect(hX + p*52, hY - p*28, p*20, p*16);
+                ctx.fillStyle = "#000000";
+                ctx.fillRect(hX + p*64, hY - p*24, p*3, p*3);
+                ctx.fillStyle = "#f39c12";
+                ctx.fillRect(hX + p*45, hY - p*12, p*22, p*2);
+
+                ctx.fillStyle = "#2c3e50";
+                ctx.fillRect(hX + p*38, hY - p*22, p*6, p*22);
+                ctx.fillRect(hX + p*2, hY + p*4, p*10, p*20);
+
+                ctx.fillStyle = "#8b4513";
+                if (frame % 8 < 4) {
+                    ctx.fillRect(hX + p*14, hY + p*24, p*7, p*20);
+                    ctx.fillRect(hX + p*42, hY + p*24, p*7, p*20);
+                } else {
+                    ctx.fillRect(hX + p*20, hY + p*24, p*7, p*20);
+                    ctx.fillRect(hX + p*48, hY + p*24, p*7, p*20);
+                }
+
+                const kX = hX + p*20;
+                const kY = hY - p*28;
+
+                ctx.fillStyle = "#7f8c8d";
+                ctx.fillRect(kX, kY, p*18, p*24);
+                ctx.fillStyle = "#c0392b";
+                ctx.fillRect(kX - p*6, kY + p*4, p*8, p*20);
+
+                ctx.fillStyle = "#e74c3c";
+                ctx.fillRect(kX + p*2, kY - p*18, p*8, p*6);
+                ctx.fillStyle = "#bdc3c7";
+                ctx.fillRect(kX + p*2, kY - p*12, p*14, p*12);
+                ctx.fillStyle = "#111111";
+                ctx.fillRect(kX + p*10, kY - p*8, p*5, p*2);
+
+                const flagX = kX + p*12;
+                const flagY = kY - p*42;
+
+                ctx.fillStyle = "#d35400";
+                ctx.fillRect(flagX, flagY, p*3, p*50);
+
+                const wave = (frame % 6 < 3) ? p : 0;
+                ctx.fillStyle = "#c0392b";
+                ctx.fillRect(flagX + p*3, flagY + wave, p*60, p*26);
+                ctx.fillStyle = "#962d22";
+                ctx.fillRect(flagX + p*3, flagY + p*23 + wave, p*60, p*3);
+
+                ctx.fillStyle = "#ffffff";
+                ctx.font = "bold 16px 'Microsoft Yahei', monospace";
+                ctx.textAlign = "left";
+                ctx.fillText("GAME OVER", flagX + p*7, flagY + p*18 + wave);
+
+                frame++;
+
+                if (frame > 85) {
+                    clearInterval(animationInterval);
+                    isEmoteActive = false;
+                    isGameOver = true;
+
+                    ctx.fillStyle = "rgba(0, 0, 0, 0.85)";
+                    ctx.fillRect(0, 0, canvas.width, canvas.height);
+
+                    ctx.fillStyle = "#ff3b30";
+                    ctx.font = "bold 36px 'Microsoft Yahei', sans-serif";
+                    ctx.textAlign = "center";
+                    ctx.fillText("GAME OVER", canvas.width / 2, canvas.height / 2 - 60);
+
+                    ctx.fillStyle = "#ffffff";
+                    ctx.font = "22px 'Microsoft Yahei', sans-serif";
+                    ctx.fillText("Final Score: " + score, canvas.width / 2, canvas.height / 2 - 15);
+
+                    btnX = (canvas.width - btnWidth) / 2;
+                    btnY = canvas.height / 2 + 25;
+
+                    ctx.fillStyle = "#e74c3c";
+                    ctx.fillRect(btnX, btnY, btnWidth, btnHeight);
+
+                    ctx.fillStyle = "#ffffff";
+                    ctx.font = "bold 18px 'Microsoft Yahei', sans-serif";
+                    ctx.fillText("Restart", canvas.width / 2, btnY + 28);
+                }
+            }, 50);
+        }
+
+        // --- 3. 电视头像素蛇 (ADAD 作弊彩蛋) ---
+        function startCheatEmote() {
+            isEmoteActive = true;
+            let frame = 0;
+
+            const animationInterval = setInterval(() => {
+                ctx.clearRect(0, 0, canvas.width, canvas.height);
+                ctx.fillStyle = "#0d0d0d";
+                ctx.fillRect(0, 0, canvas.width, canvas.height);
+
+                const p = 14;
+                const snakeX = Math.floor(canvas.width * 0.38);
+                const snakeY = Math.floor(canvas.height * 0.55);
+
+                const wiggle = (frame % 10 < 5) ? p : 0;
+
+                ctx.fillStyle = "#2ecc71";
+                ctx.fillRect(snakeX - p*2 + wiggle, snakeY + p*8, p*16, p*4);
+                ctx.fillRect(snakeX + p*2, snakeY + p*2, p*6, p*6);
+
+                ctx.fillStyle = "#34495e";
+                ctx.fillRect(snakeX - p*4, snakeY - p*8, p*16, p*12);
+                ctx.fillStyle = "#2c3e50";
+                ctx.fillRect(snakeX - p*5, snakeY - p*9, p*18, p*2);
+
+                ctx.fillStyle = "#7f8c8d";
+                ctx.fillRect(snakeX + p*1, snakeY - p*12, p*1, p*3);
+                ctx.fillRect(snakeX + p*6, snakeY - p*12, p*1, p*3);
+
+                ctx.fillStyle = (frame % 4 === 0) ? "#e74c3c" : "#111111";
+                ctx.fillRect(snakeX - p*2, snakeY - p*6, p*12, p*8);
+
+                ctx.fillStyle = "#ffffff";
+                ctx.fillRect(snakeX - p*1 + (frame % 3)*p*3, snakeY - p*4, p*2, p*2);
+                ctx.fillRect(snakeX + p*2 - (frame % 2)*p*2, snakeY - p*2, p*3, p*1);
+
+                ctx.fillStyle = "#e74c3c";
+                ctx.fillRect(snakeX + p*3, snakeY + p*4, p*2, p*3 + (frame % 2)*p);
+
+                const bubbleX = canvas.width / 2;
+                const bubbleY = snakeY - p*14;
+
+                ctx.fillStyle = "#ffffff";
+                ctx.fillRect(bubbleX - 140, bubbleY - 25, 280, 45);
+                ctx.beginPath();
+                ctx.moveTo(bubbleX - 10, bubbleY + 20);
+                ctx.lineTo(bubbleX + 10, bubbleY + 20);
+                ctx.lineTo(bubbleX, bubbleY + 32);
+                ctx.fillStyle = "#ffffff";
+                ctx.fill();
+
+                ctx.fillStyle = (frame % 6 < 3) ? "#e74c3c" : "#000000";
+                ctx.font = "bold 20px 'Microsoft Yahei', sans-serif";
+                ctx.textAlign = "center";
+                ctx.fillText("Cheating, Cheating!", bubbleX, bubbleY + 5);
+
+                frame++;
+
+                if (frame > 90) {
+                    clearInterval(animationInterval);
+                    isEmoteActive = false;
+                    isGameOver = true;
+
+                    ctx.fillStyle = "rgba(0, 0, 0, 0.9)";
+                    ctx.fillRect(0, 0, canvas.width, canvas.height);
+
+                    ctx.fillStyle = "#e74c3c";
+                    ctx.font = "bold 32px 'Microsoft Yahei', sans-serif";
+                    ctx.textAlign = "center";
+                    ctx.fillText("CHEATER DETECTED!", canvas.width / 2, canvas.height / 2 - 50);
+
+                    ctx.fillStyle = "#ffffff";
+                    ctx.font = "20px 'Microsoft Yahei', sans-serif";
+                    ctx.fillText("Score: 300 (Cheat Used)", canvas.width / 2, canvas.height / 2 - 10);
+
+                    btnX = (canvas.width - btnWidth) / 2;
+                    btnY = canvas.height / 2 + 30;
+
+                    ctx.fillStyle = "#e74c3c";
+                    ctx.fillRect(btnX, btnY, btnWidth, btnHeight);
+
+                    ctx.fillStyle = "#ffffff";
+                    ctx.font = "bold 18px 'Microsoft Yahei', sans-serif";
+                    ctx.fillText("Restart", canvas.width / 2, btnY + 28);
+                }
+            }, 50);
+        }
+
+        function render() {
+            if (isEmoteActive || isGameOver) return;
+
+            ctx.clearRect(0, 0, canvas.width, canvas.height);
+
+            if (!isGameStarted) {
+                drawStartOverlay();
+                return;
+            }
+
+            if (currentRound === 2) {
+                centerObstacles.forEach(block => {
+                    drawRect(block.x, block.y, "#8B4513");
+                });
+            }
+
+            snake.forEach((seg, index) => {
+                if (index === 0) {
+                    drawRect(seg.x, seg.y, "#4cd964");
+                } else {
+                    drawRect(seg.x, seg.y, "#2ecc71");
+                }
+            });
+
+            drawRect(food.x, food.y, "#ff3b30");
+
+            if (isPausedForTransition) {
+                drawOverlay();
+            }
+        }
+
+        function game() {
+            update();
+            render();
+        }
+
+        function checkCheatCode(key) {
+            cheatSequence.push(key);
+            if (cheatSequence.length > 4) {
+                cheatSequence.shift();
+            }
+
+            const str = cheatSequence.join('');
+            if (str === 'adad') {
+                cheatSequence = [];
+                triggerVictory(true);
+            } else if (str === 'wsws') {
+                cheatSequence = [];
+                triggerWSWS();
+            }
+        }
+
+        function changeDirection(dir) {
+            checkCheatCode(dir);
+
+            if (!isGameStarted || isPausedForTransition || isEmoteActive || isGameOver) return;
+
+            switch(dir) {
+                case "w": case "arrowup":
+                    if (dy !== 1) { dx = 0; dy = -1; }
+                    break;
+                case "s": case "arrowdown":
+                    if (dy !== -1) { dx = 0; dy = 1; }
+                    break;
+                case "a": case "arrowleft":
+                    if (dx !== 1) { dx = -1; dy = 0; }
+                    break;
+                case "d": case "arrowright":
+                    if (dx !== -1) { dx = 1; dy = 0; }
+                    break;
+            }
+        }
+
+        const buttonDirs = { btnW: 'w', btnA: 'a', btnS: 's', btnD: 'd' };
+
+        Object.keys(buttonDirs).forEach(id => {
+            const btn = document.getElementById(id);
+            const dir = buttonDirs[id];
+
+            const handlePress = (e) => {
+                e.preventDefault();
+                changeDirection(dir);
+            };
+
+            btn.addEventListener('touchstart', handlePress, { passive: false });
+            btn.addEventListener('mousedown', handlePress);
+        });
+
+        function handleCanvasTap(e) {
+            e.preventDefault();
+            const rect = canvas.getBoundingClientRect();
+
+            const clientX = e.touches ? e.touches[0].clientX : e.clientX;
+            const clientY = e.touches ? e.touches[0].clientY : e.clientY;
+
+            const scaleX = canvas.width / rect.width;
+            const scaleY = canvas.height / rect.height;
+
+            const mouseX = (clientX - rect.left) * scaleX;
+            const mouseY = (clientY - rect.top) * scaleY;
+
+            if (!isGameStarted) {
+                if (mouseX >= btnX && mouseX <= btnX + btnWidth && mouseY >= btnY && mouseY <= btnY + btnHeight) {
+                    resetGame();
+                }
+                return;
+            }
+
+            if (isPausedForTransition) {
+                if (mouseX >= btnX && mouseX <= btnX + btnWidth && mouseY >= btnY && mouseY <= btnY + btnHeight) {
+                    startRound2(false);
+                }
+                return;
+            }
+
+            if (isGameOver) {
+                if (mouseX >= btnX && mouseX <= btnX + btnWidth && mouseY >= btnY && mouseY <= btnY + btnHeight) {
+                    resetGame();
+                }
+
+                if (!isCheatVictory && currentRound === 2 && mouseX >= btnR2X && mouseX <= btnR2X + btnWidth && mouseY >= btnR2Y && mouseY <= btnR2Y + btnHeight) {
+                    startRound2(true);
+                }
+            }
+        }
+
+        canvas.addEventListener('touchstart', handleCanvasTap, { passive: false });
+        canvas.addEventListener('click', handleCanvasTap);
+
+        document.addEventListener('keydown', (e) => {
+            changeDirection(e.key.toLowerCase());
+        });
+
+        render();
+    </script>
+</body>
+</html>
